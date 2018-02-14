@@ -1,0 +1,186 @@
+import json
+import csv
+
+ACTION_START = 6
+COLUMN_USER_ID = 3
+CASE_ID = 5
+
+ACTIONS = {}
+STATES = {}
+TRAJECTORIES = []
+LINKS = {}
+
+
+def create_node():
+    stateType = 'start'
+    STATES[0] = {'id': 0,
+                   'type': stateType,
+                   'parent_sequence': [],
+                       'details': {'event_type': 'start'},
+                       'stat': {},
+                       'user_ids': []}
+
+    stateType = 'end'
+    STATES[1] = {'id': 1,
+                   'parent_sequence': [],
+                   'type': stateType,
+                       'details': {'event_type': 'end'},
+                       'stat': {},
+                       'user_ids': []}
+
+    stateType = 'mid'
+    for action in ACTIONS:
+        # print(ACTIONS[action])
+        STATES[ACTIONS[action] + 2] = {'id': ACTIONS[action] + 2,
+                       'parent_sequence': [],
+                       'type': stateType,
+                       'details': {'event_type': action},
+                       'stat': {},
+                       'user_ids': []}
+
+
+def update_state(state_id, user_id):
+    STATES[state_id]['user_ids'].append(user_id)
+
+
+def add_links(trajectory, user_id):
+    for item in range(0, len(trajectory) - 1):
+        id = str(trajectory[item]) + "_" + str(trajectory[item + 1])
+        if id not in LINKS:
+            LINKS[id] = {'id': id,
+                         'source': trajectory[item],
+                         'target': trajectory[item + 1],
+                         'user_ids': [user_id]}
+        else:
+            users = LINKS[id]['user_ids']
+            users.append(user_id)
+            unique_user_set = list(set(users))
+            LINKS[id]['user_ids'] = unique_user_set
+
+
+def create_trajectory(row, user_id, user):
+    trajectory = [0]
+    action_meaning = ["start_game"]
+
+    update_state(0, user_id)
+
+    action_flag = {}
+    for action in ACTIONS:
+        action_flag[action] = False
+
+    for item in row:
+        if item == "":
+            break
+        trajectory.append(ACTIONS[item] + 2)
+        action_meaning.append("transition")
+
+        if not action_flag[item]:
+            action_flag[item] = True
+            update_state(ACTIONS[item] + 2, user_id)
+
+    trajectory.append(1)
+    update_state(1, user_id)
+    action_meaning.append("end_game")
+
+    add_links(trajectory, user_id)
+
+    user_ids = [user_id]
+    TRAJECTORIES.append({'trajectory': trajectory,
+                         'action_meaning': action_meaning,
+                         'user_ids': user_ids,
+                         'id': user})
+
+
+def parse_data_to_json_format(csv_reader):
+    create_node()
+    user_count = 0
+
+    for row in csv_reader:
+        if row[0] == 'mode':
+            continue
+        # print('length: ' + str(len(row)))
+        # print(row[6: len(row)])
+        # exit(1)
+        user_id = row[COLUMN_USER_ID] + '_' + row[CASE_ID]
+        create_trajectory(row[ACTION_START:len(row)], user_id, user_count)
+        user_count += 1
+
+    state_list = []
+    for state in STATES:
+        state_list.append(STATES[state])
+
+    link_list = []
+    for link in LINKS:
+        link_list.append(LINKS[link])
+
+    return {'level_info': 'Visualization',
+            'num_patterns': user_count,
+            'num_users': user_count,
+            'nodes': state_list,
+            'links': link_list,
+            'trajectories': TRAJECTORIES,
+            'traj_similarity': [],
+            'setting': 'test'}
+
+
+def process_data(filename, action_from_file=True):
+    if action_from_file:
+        with open(filename, 'r') as data_file:
+            csv_reader = csv.reader(data_file)
+            find_actions(csv_reader)
+
+    with open(filename, 'r') as data_file:
+        csv_reader = csv.reader(data_file)
+        viz_data = parse_data_to_json_format(csv_reader)
+        with open('../data/counterbalance1_proximity_stats.json', 'w') as outfile:
+            json.dump(viz_data, outfile)
+            outfile.close()
+
+        print('Done writing to file.')
+
+
+def create_game_action_dict(actions):
+    count_action = 0
+    for action in actions:
+        ACTIONS[action] = count_action
+        count_action += 1
+
+
+def find_actions(csv_reader):
+    count_action = 0
+    for row in csv_reader:
+        if row[0] == 'mode':
+            continue
+
+        actions = row[ACTION_START:]
+
+        for item in actions:
+            if item == "":
+                break
+            if item not in ACTIONS:
+                ACTIONS[item] = count_action
+                count_action += 1
+
+
+if __name__ == "__main__":
+    game_actions = ["briefcase_locked",
+    "briefcase_unlocked",
+    "open_fax_log",
+    "fax_log_delete",
+    "stealthy",
+    "shred",
+    "call",
+    "conjecture",
+    "enter_room",
+    "fax",
+    "notebook_page",
+    "pickup",
+    "put_down"]
+
+    # game_actions = ["pickup", "notebook_page", "enter_room", "briefcase_locked", "fax", "shred", "fax_log_delete"]
+    create_game_action_dict(game_actions)
+    # print(ACTIONS)
+    # filename = "../data/spies_7_actions_counterbalance1_knowledgeHigh_PUZZLING.csv"
+    filename = "../data/spies_counterbalance1_knowledgeHigh.csv"
+    process_data(filename, False)
+    # print(STATES)
