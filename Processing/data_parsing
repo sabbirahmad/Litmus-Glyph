@@ -1,5 +1,6 @@
 import json
 import csv
+import hashlib
 from os.path import basename
 
 ACTION_START = 9  # 6
@@ -62,6 +63,7 @@ def add_links(trajectory, user_id):
 def create_trajectory(row, user_id, user):
     trajectory = [0]
     action_meaning = ["start_game"]
+    hash_str = ""
 
     update_state(0, user_id)
 
@@ -72,6 +74,7 @@ def create_trajectory(row, user_id, user):
     for item in row:
         if item == "":
             break
+        hash_str += item
         trajectory.append(ACTIONS[item] + 2)
         action_meaning.append("transition")
 
@@ -86,10 +89,23 @@ def create_trajectory(row, user_id, user):
     add_links(trajectory, user_id)
 
     user_ids = [user_id]
-    TRAJECTORIES.append({'trajectory': trajectory,
-                         'action_meaning': action_meaning,
-                         'user_ids': user_ids,
-                         'id': user})
+
+    hash_object = hashlib.sha256(hash_str.encode())
+    hash_value = hash_object.hexdigest()
+    # exit(1)
+
+    for traj in TRAJECTORIES:
+        if traj['hash'] == hash_value:
+            traj['user_ids'].append(user_id)
+            break
+
+    else:
+        TRAJECTORIES.append({'trajectory': trajectory,
+                             'action_meaning': action_meaning,
+                             'user_ids': user_ids,
+                             'id': user,
+                             'hash': hash_value,
+                             'completed': True})
 
 
 def parse_data_to_json_format(csv_reader):
@@ -103,7 +119,7 @@ def parse_data_to_json_format(csv_reader):
         create_trajectory(row[ACTION_START:len(row)], user_id, user_count)
         user_count += 1
 
-    print('i = ', i)
+    # print('i = ', i)
 
     state_list = []
     for state in STATES:
@@ -183,8 +199,8 @@ if __name__ == "__main__":
     # print(ACTIONS)
     # filename = "../data/spies_7_actions_counterbalance1_knowledgeHigh_PUZZLING.csv"
     # filename = "../data/spies_counterbalance1_knowledgeHigh.csv"
-    filename = "../data/cycle3_CONTROL.csv"
-    # filename = "../data/cycle3_SPY.csv"
+    filename = "../data/c3_doc_overlay_spyLead_CONTROL.csv"
+    # filename = "../data/c3_doc_overlay_spyLead_SPY.csv"
     process_data(filename)
-    print(ACTIONS)
+    # print(ACTIONS)
     # print(STATES)
