@@ -2,10 +2,10 @@ import json
 import csv
 import os
 
-raw_data_folder = "../data/raw/"
-output_folder = "../data/output/"
 
-ACTION_START = 9  # no of column from where action names start in csv file
+INFINITE_SIMILARITY = 500
+ACTION_START = 9  # no of column from where action names start in csv file;
+                # change if the format of data is different in different files
 PART1_ID = 0  # no of column used for the user id part 1
 PART2_ID = 7  # no of column used for the user id part 2
 
@@ -124,6 +124,106 @@ def create_trajectory(row, user_id):
                              'completed': True}
 
 
+def is_start_or_end(state):
+    """checks is the state is a start or end state"""
+    return state['type'] == 'start' or state['type'] == 'end'
+
+
+def get_state_diff(state1, state2):
+    if is_start_or_end(state1) or is_start_or_end(state2):
+        if state1['details'] == state2['details']:
+            return 0
+        else:
+            return INFINITE_SIMILARITY
+
+    else:
+        if state1['details'] == state2['details']:
+            return 0
+        else:
+            return 1
+
+
+def getDTW_DB_id(traj1Id, traj2Id, query_setting):
+    """
+    Return the unique id of the comparison as stored in the db
+    """
+    if traj1Id < traj2Id:
+        return '_'.join([query_setting, str(traj1Id), str(traj2Id)])
+
+    return '_'.join([query_setting, str(traj2Id), str(traj1Id)])
+
+
+def compute_dtw(traj1, traj2, stateDict):
+    """
+    Compute DTW of traj1 and traj2
+    States are the important factors
+    """
+    states1 = traj1
+    states2 = traj2
+
+    n = len(states1)
+    m = len(states2)
+    DTW = []
+    for i in range(0, n + 1):
+        DTW.append([])
+        for j in range(0, m + 1):
+            DTW[i].append(INFINITE_SIMILARITY)
+
+    DTW[0][0] = 0
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            cost = get_state_diff(stateDict[int(states1[i - 1])], stateDict[int(states2[j - 1])])
+
+            DTW[i][j] = cost + min(DTW[i - 1][j], DTW[i][j - 1], DTW[i - 1][j - 1])
+
+    return DTW[n][m]
+
+
+def trajectory_similarity(trajectories, stateDict):
+    # sort json_trajectories according to number of users
+    json_trajectories = sorted(trajectories.values(), key=lambda t: len(t['user_ids']), reverse=True)
+
+    # TODO: compute trajectory similarity here
+    print("Computing traj similarity..." + str(len(json_trajectories)))
+    traj_similarity = []
+
+    # traj_id now play the role of similarity ID
+    similarity_id = 0
+
+    # skipped_traj_ids stores the trajectories that are too close to some trajectories
+    # thus need not be recomputed
+    skipped_traj_ids = []
+
+    for i in range(len(json_trajectories) - 1):
+        if i not in skipped_traj_ids:
+            # print("%d," % i),
+            # assert i == json_trajectories[i]['id']
+
+            for j in range(i + 1, len(json_trajectories)):
+                # assert j == json_trajectories[j]['id']
+
+                sim = compute_dtw(json_trajectories[i]['trajectory'],
+                                  json_trajectories[j]['trajectory'],
+                                  stateDict)
+
+                # print('Similarity ', json_trajectories[i]['id'], len(json_trajectories[i]['trajectory']),
+                #       json_trajectories[j]['id'], len(json_trajectories[j]['trajectory']), ':', sim)
+
+                traj_similarity.append({'id': similarity_id,
+                                        'source': json_trajectories[i]['id'],
+                                        'target': json_trajectories[j]['id'],
+                                        'similarity': sim
+                                        })
+                similarity_id += 1
+
+                # if sim < SIMILARITY_THRESHOLD and j not in skipped_traj_ids:
+                #     print "Skipping: %d" % j
+                #     skipped_traj_ids.append(j)
+
+    print("Done!")
+    return traj_similarity
+
+
 def parse_data_to_json_format(csv_reader):
     """
     parse csv data to create node, link and trajectory
@@ -137,6 +237,8 @@ def parse_data_to_json_format(csv_reader):
         user_id = row[PART1_ID] + '_' + row[PART2_ID]  # generate user id
         create_trajectory(row[ACTION_START:len(row)], user_id)
 
+    traj_sim = trajectory_similarity(TRAJECTORIES, STATES)
+
     # generate lists from dictionaries
     state_list = list(STATES.values())
     link_list = list(LINKS.values())
@@ -148,7 +250,7 @@ def parse_data_to_json_format(csv_reader):
             'nodes': state_list,
             'links': link_list,
             'trajectories': trajectory_list,
-            'traj_similarity': [],
+            'traj_similarity': traj_sim,
             'setting': 'test'}
 
 
@@ -172,7 +274,7 @@ def find_actions(csv_reader):
                 count_action += 1
 
 
-def process_data(raw_data_folder, action_from_file=True):
+def process_data(raw_data_folder, output_folder, action_from_file=True):
     """
     process each csv file to create the json file for glyph
     :param filename: input csv file
@@ -203,11 +305,11 @@ def process_data(raw_data_folder, action_from_file=True):
                     csv_reader = csv.reader(data_file)
                     next(csv_reader, None)
                     viz_data = parse_data_to_json_format(csv_reader)
-                    with open('../data/output/' + file_base + '.json', 'w') as outfile:
+                    with open(output_folder + file_base + '.json', 'w') as outfile:
                         json.dump(viz_data, outfile)
                         outfile.close()
 
-                    print('Done writing to : ' + file_base + '.json')
+                    print('\tDone writing to : ' + file_base + '.json')
 
             ind += 1
 
@@ -243,8 +345,18 @@ if __name__ == "__main__":
     create_game_action_dict(game_actions)
     # print(ACTIONS)
 
-    process_data(raw_data_folder, action_from_file=True)
+    raw_data_folder = "../data/raw/"
+    output_folder = "../data/output/"
+
+    process_data(raw_data_folder, output_folder, action_from_file=True)
     # print(ACTIONS)
     # print(STATES)
 
-    print(json.dumps(file_names_list))
+    # print("File names of visualization_ids.json")
+    # print(json.dumps(file_names_list))
+
+    # generate the visualization_ids.json file
+    with open(output_folder + 'visualization_ids.json', 'w') as outfile:
+        json.dump(file_names_list, outfile)
+        outfile.close()
+        print("\nvisualization_ids.json file generated.")
